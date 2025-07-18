@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MinePanel - Server Management</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+        background-color: #1e1e1e;
+        color: #ffffff;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      .header {
+        text-align: center;
+        margin-bottom: 30px;
+      }
+      .server-panel {
+        background-color: #2d2d2d;
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 20px;
+        border: 1px solid #444;
+      }
+      .server-info {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+      }
+      .server-name {
+        font-size: 24px;
+        font-weight: bold;
+        color: #4caf50;
+      }
+      .server-status {
+        padding: 8px 16px;
+        border-radius: 20px;
+        font-weight: bold;
+        text-transform: uppercase;
+        font-size: 12px;
+      }
+      .status-running {
+        background-color: #4caf50;
+        color: white;
+      }
+      .status-stopped {
+        background-color: #f44336;
+        color: white;
+      }
+      .status-creating {
+        background-color: #ff9800;
+        color: white;
+      }
+      .status-unknown {
+        background-color: #9e9e9e;
+        color: white;
+      }
+      .controls {
+        display: flex;
+        gap: 10px;
+        margin-bottom: 20px;
+        flex-wrap: wrap;
+      }
+      button {
+        padding: 12px 24px;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-weight: bold;
+        transition: background-color 0.3s;
+      }
+      .btn-primary {
+        background-color: #007acc;
+        color: white;
+      }
+      .btn-primary:hover {
+        background-color: #005a9e;
+      }
+      .btn-success {
+        background-color: #4caf50;
+        color: white;
+      }
+      .btn-success:hover {
+        background-color: #45a049;
+      }
+      .btn-danger {
+        background-color: #f44336;
+        color: white;
+      }
+      .btn-danger:hover {
+        background-color: #da190b;
+      }
+      .btn-secondary {
+        background-color: #6c757d;
+        color: white;
+      }
+      .btn-secondary:hover {
+        background-color: #5a6268;
+      }
+      button:disabled {
+        background-color: #444;
+        cursor: not-allowed;
+        opacity: 0.6;
+      }
+      .log-section {
+        margin-top: 20px;
+      }
+      .log-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 10px;
+      }
+      .log-container {
+        background-color: #0d1117;
+        border: 1px solid #30363d;
+        border-radius: 6px;
+        padding: 16px;
+        height: 400px;
+        overflow-y: auto;
+        font-family: "Courier New", monospace;
+        font-size: 14px;
+        line-height: 1.4;
+      }
+      .log-line {
+        margin: 2px 0;
+        word-wrap: break-word;
+      }
+      .log-line.error {
+        color: #ff6b6b;
+      }
+      .log-line.warning {
+        color: #ffd93d;
+      }
+      .log-line.info {
+        color: #6bcf7f;
+      }
+      .connection-status {
+        padding: 8px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: bold;
+      }
+      .ws-connected {
+        background-color: #0d4f3c;
+        border: 1px solid #238636;
+        color: #238636;
+      }
+      .ws-disconnected {
+        background-color: #4c1f1f;
+        border: 1px solid #da3633;
+        color: #da3633;
+      }
+      .ws-connecting {
+        background-color: #3d2f00;
+        border: 1px solid #d29922;
+        color: #d29922;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>🎮 MinePanel - Server Management</h1>
+        <p>Manage your Minecraft server with real-time logs</p>
+      </div>
+
+      <div class="server-panel">
+        <div class="server-info">
+          <div class="server-name">test</div>
+          <div id="serverStatus" class="server-status status-unknown">
+            Unknown
+          </div>
+        </div>
+
+        <div class="controls">
+          <button id="createBtn" class="btn-primary" onclick="createServer()">
+            Create Server
+          </button>
+          <button
+            id="startBtn"
+            class="btn-success"
+            onclick="startServer()"
+            disabled
+          >
+            Start Server
+          </button>
+          <button
+            id="stopBtn"
+            class="btn-danger"
+            onclick="stopServer()"
+            disabled
+          >
+            Stop Server
+          </button>
+          <button class="btn-secondary" onclick="refreshStatus()">
+            Refresh Status
+          </button>
+        </div>
+
+        <div class="log-section">
+          <div class="log-header">
+            <h3>Server Logs</h3>
+            <div>
+              <!-- Logs always streaming; status hidden -->
+              <!-- Log connect/disconnect controls removed -->
+              <button class="btn-secondary" onclick="clearLogs()">Clear</button>
+            </div>
+          </div>
+          <div class="log-container" id="logContainer">
+            <div class="log-line">Ready to manage server 'test'...</div>
+            <div class="log-line">
+              Click 'Create Server' to start, then use Start/Stop buttons to
+              control it.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      let socket = null;
+      let isLogsConnected = false;
+      const serverName = "test"; // Fixed server name for this demo
+
+      // Initialize the page
+      document.addEventListener("DOMContentLoaded", function () {
+        refreshStatus();
+      });
+
+      function updateServerStatus(status) {
+        const statusEl = document.getElementById("serverStatus");
+        const createBtn = document.getElementById("createBtn");
+        const startBtn = document.getElementById("startBtn");
+        const stopBtn = document.getElementById("stopBtn");
+
+        // Update status display
+        statusEl.textContent = status;
+        statusEl.className = `server-status status-${status.toLowerCase()}`;
+
+        // Update button states
+        switch (status.toLowerCase()) {
+          case "running":
+            createBtn.disabled = true;
+            startBtn.disabled = true;
+            stopBtn.disabled = false;
+            break;
+          case "stopped":
+          case "exited":
+            createBtn.disabled = true;
+            startBtn.disabled = false;
+            stopBtn.disabled = true;
+            break;
+          case "creating":
+            createBtn.disabled = true;
+            startBtn.disabled = true;
+            stopBtn.disabled = true;
+            break;
+          case "not found":
+            createBtn.disabled = false;
+            startBtn.disabled = true;
+            stopBtn.disabled = true;
+            break;
+          default:
+            createBtn.disabled = false;
+            startBtn.disabled = true;
+            stopBtn.disabled = true;
+        }
+      }
+
+      function updateWSStatus(status) {
+        // WebSocket status UI elements were removed - this function is now a no-op
+        console.log("WebSocket status:", status);
+      }
+
+      function addLogLine(message, type = "info") {
+        const container = document.getElementById("logContainer");
+        const logLine = document.createElement("div");
+        logLine.className = `log-line ${type}`;
+        logLine.textContent = new Date().toLocaleTimeString() + " - " + message;
+        container.appendChild(logLine);
+        container.scrollTop = container.scrollHeight;
+
+        // Keep only last 1000 lines to prevent memory issues
+        while (container.children.length > 1000) {
+          container.removeChild(container.firstChild);
+        }
+      }
+
+      async function makeAPICall(endpoint, method = "POST", showLog = true) {
+        try {
+          console.log(`DEBUG: Making API call - ${method} ${endpoint}`);
+          if (showLog) addLogLine(`Making ${method} request to ${endpoint}...`);
+
+          const response = await fetch(`http://localhost:8080${endpoint}`, {
+            method: method,
+            headers: {
+              "Content-Type": "application/json",
+            },
+          });
+
+          const data = await response.json();
+          console.log(
+            `DEBUG: API response - Status: ${response.status}, Data:`,
+            data
+          );
+
+          if (showLog) {
+            if (response.ok) {
+              addLogLine(
+                `Success: ${data.message || JSON.stringify(data)}`,
+                "info"
+              );
+            } else {
+              addLogLine(
+                `Error: ${data.error || data.message || "Unknown error"}`,
+                "error"
+              );
+            }
+          }
+
+          return { ok: response.ok, data };
+        } catch (error) {
+          console.log(`DEBUG: API call error:`, error);
+          if (showLog) addLogLine(`Network error: ${error.message}`, "error");
+          return { ok: false, data: { error: error.message } };
+        }
+      }
+
+      async function createServer() {
+        const result = await makeAPICall(
+          `/api/v1/minecraft/${serverName}`,
+          "POST"
+        );
+        if (result.ok) {
+          updateServerStatus("Creating");
+          // Check status after a short delay to see if creation completed
+          setTimeout(() => {
+            refreshStatus();
+            // Auto-connect to logs if server is running after creation
+            setTimeout(async () => {
+              const statusResult = await makeAPICall(
+                `/api/v1/minecraft/${serverName}/status`,
+                "GET",
+                false
+              );
+              if (
+                statusResult.ok &&
+                statusResult.data.status &&
+                statusResult.data.status.toLowerCase() === "running"
+              ) {
+                if (!isLogsConnected) {
+                  connectToLogs();
+                }
+              }
+            }, 3000);
+          }, 2000);
+        }
+      }
+
+      async function startServer() {
+        const result = await makeAPICall(
+          `/api/v1/minecraft/${serverName}/start`,
+          "POST"
+        );
+        if (result.ok) {
+          setTimeout(() => {
+            refreshStatus();
+            // Auto-connect to logs after server starts (with delay to ensure container is ready)
+            setTimeout(() => {
+              if (!isLogsConnected) {
+                connectToLogs();
+              }
+            }, 2000);
+          }, 1000);
+        }
+      }
+
+      async function stopServer() {
+        // Disconnect logs before stopping server
+        if (isLogsConnected) {
+          disconnectFromLogs();
+        }
+
+        const result = await makeAPICall(
+          `/api/v1/minecraft/${serverName}/stop`,
+          "POST"
+        );
+        if (result.ok) {
+          setTimeout(refreshStatus, 1000);
+        }
+      }
+
+      async function refreshStatus() {
+        const result = await makeAPICall(
+          `/api/v1/minecraft/${serverName}/status`,
+          "GET",
+          false
+        );
+        if (result.ok && result.data.status) {
+          const currentStatus = result.data.status.toLowerCase();
+          updateServerStatus(result.data.status);
+
+          // Auto-disconnect logs if server is not running
+          if (isLogsConnected && currentStatus !== "running") {
+            addLogLine(`Server is ${currentStatus}, disconnecting logs...`);
+            disconnectFromLogs();
+          }
+        } else {
+          updateServerStatus("Not Found");
+          // Disconnect logs if server doesn't exist
+          if (isLogsConnected) {
+            addLogLine("Server not found, disconnecting logs...");
+            disconnectFromLogs();
+          }
+        }
+      }
+
+      // Manual log toggling removed; logs connect automatically when server runs
+
+      function connectToLogs() {
+        console.log("DEBUG: connectToLogs() called");
+        if (isLogsConnected) {
+          console.log("DEBUG: Already connected, disconnecting first");
+          disconnectFromLogs();
+        }
+
+        // Check if server is running before attempting to connect
+        console.log("DEBUG: Checking server status before connecting to logs");
+        makeAPICall(`/api/v1/minecraft/${serverName}/status`, "GET", false)
+          .then((result) => {
+            console.log("DEBUG: Server status check result:", result);
+            if (
+              !result.ok ||
+              !result.data.status ||
+              result.data.status.toLowerCase() !== "running"
+            ) {
+              console.log("DEBUG: Server not running, cannot connect to logs");
+              addLogLine(
+                `Cannot connect to logs: Server is not running (status: ${
+                  result.data.status || "unknown"
+                })`,
+                "error"
+              );
+              return;
+            }
+
+            console.log(
+              "DEBUG: Server is running, attempting WebSocket connection"
+            );
+            updateWSStatus("connecting");
+            addLogLine(`Connecting to logs for server: ${serverName}`);
+
+            const wsUrl = `ws://localhost:8080/api/v1/minecraft/${serverName}/logs`;
+            console.log("DEBUG: WebSocket URL:", wsUrl);
+            socket = new WebSocket(wsUrl);
+
+            socket.onopen = function (event) {
+              console.log("DEBUG: WebSocket onopen triggered", event);
+              isLogsConnected = true;
+              updateWSStatus("connected");
+              addLogLine(
+                `WebSocket connection established for ${serverName}`,
+                "info"
+              );
+            };
+
+            socket.onmessage = function (event) {
+              console.log("DEBUG: WebSocket message received:", event.data);
+              // Clean up Docker log timestamps for better readability
+              let logData = event.data;
+              logData = logData.replace(
+                /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z\s+/,
+                ""
+              );
+
+              console.log("DEBUG: Cleaned log data:", logData);
+
+              // Determine log type based on content
+              let logType = "info";
+              if (
+                logData.toLowerCase().includes("error") ||
+                logData.toLowerCase().includes("exception")
+              ) {
+                logType = "error";
+              } else if (logData.toLowerCase().includes("warn")) {
+                logType = "warning";
+              }
+
+              addLogLine(logData, logType);
+            };
+
+            socket.onclose = function (event) {
+              console.log("DEBUG: WebSocket onclose triggered", event);
+              isLogsConnected = false;
+              updateWSStatus("disconnected");
+              addLogLine("WebSocket connection closed");
+            };
+
+            socket.onerror = function (error) {
+              console.log("DEBUG: WebSocket onerror triggered", error);
+              isLogsConnected = false;
+              updateWSStatus("disconnected");
+              addLogLine(
+                `WebSocket connection failed - make sure the server is running`,
+                "error"
+              );
+            };
+          })
+          .catch((error) => {
+            console.log("DEBUG: Error checking server status:", error);
+            addLogLine(
+              `Failed to check server status: ${error.message}`,
+              "error"
+            );
+          });
+      }
+
+      function disconnectFromLogs() {
+        if (socket) {
+          if (isLogsConnected) {
+            addLogLine("Disconnecting from logs...");
+          }
+          socket.close();
+          socket = null;
+        }
+        isLogsConnected = false;
+        updateWSStatus("disconnected");
+      }
+
+      function clearLogs() {
+        const container = document.getElementById("logContainer");
+        container.innerHTML =
+          "<div class=\"log-line\">Logs cleared - Ready to manage server 'test'...</div>";
+      }
+
+      // Auto-refresh status every 10 seconds
+      setInterval(refreshStatus, 10000);
+    </script>
+  </body>
+</html>
