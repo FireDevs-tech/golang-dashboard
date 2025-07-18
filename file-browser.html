@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MinePanel - File Browser</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 20px;
+        background: #1e1e1e;
+        color: #fff;
+      }
+      .container {
+        max-width: 1000px;
+        margin: 0 auto;
+      }
+      .header {
+        text-align: center;
+        margin-bottom: 20px;
+      }
+      .breadcrumb {
+        margin-bottom: 15px;
+      }
+      .breadcrumb span {
+        cursor: pointer;
+        color: #4caf50;
+      }
+      .breadcrumb span:hover {
+        text-decoration: underline;
+      }
+      .file-list {
+        width: 100%;
+        border-collapse: collapse;
+      }
+      .file-list th,
+      .file-list td {
+        padding: 10px;
+        border-bottom: 1px solid #444;
+      }
+      .file-list th {
+        text-align: left;
+      }
+      .file-list tr:hover {
+        background: #2d2d2d;
+      }
+      .icon {
+        width: 16px;
+        display: inline-block;
+        text-align: center;
+      }
+      .type-dir .icon::before {
+        content: "📁";
+      }
+      .type-file .icon::before {
+        content: "📄";
+      }
+      .btn-back {
+        background: #007acc;
+        color: #fff;
+        border: none;
+        padding: 8px 12px;
+        cursor: pointer;
+        border-radius: 4px;
+      }
+      .btn-back:disabled {
+        background: #444;
+        cursor: not-allowed;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>🔍 MinePanel - File Browser</h1>
+        <p>Browse Minecraft server files and folders</p>
+      </div>
+      <div class="breadcrumb" id="breadcrumb"></div>
+      <table class="file-list">
+        <thead>
+          <tr>
+            <th>Name</th>
+            <th>Type</th>
+            <th>Size</th>
+          </tr>
+        </thead>
+        <tbody id="fileTable"></tbody>
+      </table>
+    </div>
+
+    <script>
+      const serverName = "test";
+      let currentPath = "/data"; // Start from Minecraft server directory
+
+      // Build breadcrumb navigation
+      function updateBreadcrumb() {
+        const bc = document.getElementById("breadcrumb");
+
+        // Show relative path from /data
+        let displayPath = currentPath;
+        if (currentPath.startsWith("/data")) {
+          displayPath = currentPath.substring(5) || "/"; // Remove /data prefix
+        }
+
+        const parts = displayPath.split("/").filter((p) => p !== "");
+        let pathAcc = "/data";
+        bc.innerHTML = '<span data-path="/data">📁 Minecraft Server</span>';
+        bc.querySelector("span").addEventListener("click", () => {
+          loadFiles("/data");
+        });
+
+        parts.forEach((part, i) => {
+          pathAcc += "/" + part;
+          const sep = document.createTextNode(" / ");
+          bc.appendChild(sep);
+          const span = document.createElement("span");
+          span.textContent = part;
+          span.dataset.path = pathAcc;
+          span.addEventListener("click", () => loadFiles(pathAcc));
+          bc.appendChild(span);
+        });
+      }
+
+      // Load files from backend
+      async function loadFiles(path) {
+        currentPath = path;
+        updateBreadcrumb();
+        const tbody = document.getElementById("fileTable");
+        tbody.innerHTML = '<tr><td colspan="3">Loading...</td></tr>';
+        try {
+          const res = await fetch(
+            `http://localhost:8080/api/v1/minecraft/${serverName}/files?path=${encodeURIComponent(
+              path
+            )}`
+          );
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || "Failed to load");
+          tbody.innerHTML = "";
+          // Parent directory link
+          if (path !== "/data") {
+            const parent = path.substring(0, path.lastIndexOf("/")) || "/data";
+            const tr = document.createElement("tr");
+            tr.innerHTML = `<td colspan="3"><button class="btn-back" onclick="loadFiles('${parent}')">⬆️ Up</button></td>`;
+            tbody.appendChild(tr);
+          }
+          data.files.forEach((item) => {
+            const tr = document.createElement("tr");
+            tr.className = item.type === "directory" ? "type-dir" : "type-file";
+            const nameCell = document.createElement("td");
+            const icon = document.createElement("span");
+            icon.className = "icon";
+            nameCell.appendChild(icon);
+            if (item.type === "directory") {
+              const link = document.createElement("span");
+              link.textContent = item.name;
+              link.style.cursor = "pointer";
+              link.addEventListener("click", () =>
+                loadFiles(
+                  path.endsWith("/") ? path + item.name : path + "/" + item.name
+                )
+              );
+              nameCell.appendChild(link);
+            } else {
+              // Check if file is editable (text files)
+              const isEditable = isEditableFile(item.name);
+
+              if (isEditable) {
+                const link = document.createElement("span");
+                link.textContent = item.name;
+                link.style.cursor = "pointer";
+                link.style.color = "#4caf50";
+                link.addEventListener("click", () => {
+                  const filePath = path.endsWith("/")
+                    ? path + item.name
+                    : path + "/" + item.name;
+                  openFileEditor(filePath);
+                });
+                nameCell.appendChild(link);
+              } else {
+                const link = document.createElement("a");
+                link.textContent = item.name;
+                link.href = `http://localhost:8080/api/v1/minecraft/${serverName}/files/download?path=${encodeURIComponent(
+                  path.endsWith("/") ? path + item.name : path + "/" + item.name
+                )}`;
+                link.target = "_blank";
+                nameCell.appendChild(link);
+              }
+            }
+            const typeCell = document.createElement("td");
+            typeCell.textContent = item.type;
+            const sizeCell = document.createElement("td");
+            sizeCell.textContent = item.size || "-";
+            tr.appendChild(nameCell);
+            tr.appendChild(typeCell);
+            tr.appendChild(sizeCell);
+            tbody.appendChild(tr);
+          });
+        } catch (err) {
+          tbody.innerHTML = `<tr><td colspan="3" style="color:red">Error: ${err.message}</td></tr>`;
+        }
+      }
+
+      // Check if a file is editable (text-based)
+      function isEditableFile(filename) {
+        const editableExtensions = [
+          ".properties",
+          ".json",
+          ".yml",
+          ".yaml",
+          ".txt",
+          ".log",
+          ".cfg",
+          ".conf",
+          ".config",
+          ".ini",
+          ".sh",
+          ".bat",
+          ".md",
+        ];
+
+        const ext = filename.toLowerCase().substring(filename.lastIndexOf("."));
+        return (
+          editableExtensions.includes(ext) ||
+          filename === "whitelist.json" ||
+          filename === "ops.json" ||
+          filename === "banned-players.json" ||
+          filename === "banned-ips.json"
+        );
+      }
+
+      // Open file in editor
+      function openFileEditor(filePath) {
+        window.location.href = `file-editor.html?path=${encodeURIComponent(
+          filePath
+        )}`;
+      }
+
+      // Initialize browser
+      document.addEventListener("DOMContentLoaded", () => {
+        loadFiles("/data"); // Start from Minecraft server directory
+      });
+    </script>
+  </body>
+</html>
