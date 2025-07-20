@@ -29,6 +29,7 @@ type MinecraftServer struct {
 	Status      string `json:"status"`
 	Image       string `json:"image"`
 	Port        string `json:"port"`
+	Type        string `json:"type"`
 	ContainerID string `json:"container_id"`
 }
 
@@ -45,10 +46,10 @@ func (c *Client) Close() error {
 	return c.cli.Close()
 }
 
-func (c *Client) CreateMinecraftServer(ctx context.Context, serverName, serverPort string) (*MinecraftServer, error) {
+func (c *Client) CreateMinecraftServer(ctx context.Context, serverName, serverPort, serverType string) (*MinecraftServer, error) {
 	imageName := "itzg/minecraft-server:latest"
 
-	log.Printf("Starting container creation for server: %s on port: %s", serverName, serverPort)
+	log.Printf("Starting container creation for server: %s on port: %s with type: %s", serverName, serverPort, serverType)
 
 	// Check if image exists locally first
 	_, err := c.cli.ImageInspect(ctx, imageName)
@@ -87,15 +88,33 @@ func (c *Client) CreateMinecraftServer(ctx context.Context, serverName, serverPo
 
 	log.Printf("Creating container configuration for %s", serverName)
 
+	// Create environment variables based on server type
+	env := []string{
+		"EULA=TRUE",
+		fmt.Sprintf("SERVER_NAME=%s", serverName),
+		"VERSION=LATEST",
+	}
+
+	// Add server type specific environment variables
+	switch strings.ToLower(serverType) {
+	case "paper":
+		env = append(env, "TYPE=PAPER")
+	case "fabric":
+		env = append(env, "TYPE=FABRIC")
+	case "forge":
+		env = append(env, "TYPE=FORGE")
+	case "vanilla":
+		env = append(env, "TYPE=VANILLA")
+	default:
+		env = append(env, "TYPE=VANILLA") // Default to vanilla
+	}
+
+	log.Printf("Environment variables for %s: %v", serverName, env)
+
 	// Create container configuration
 	config := &container.Config{
-		Image: imageName,
-		Env: []string{
-			"EULA=TRUE",
-			"TYPE=VANILLA",
-			"VERSION=LATEST",
-			fmt.Sprintf("SERVER_NAME=%s", serverName),
-		},
+		Image:        imageName,
+		Env:          env,
 		ExposedPorts: exposedPorts,
 	}
 
@@ -166,12 +185,25 @@ func (c *Client) ListMinecraftServers(ctx context.Context) ([]MinecraftServer, e
 				port = fmt.Sprintf("%d", container.Ports[0].PublicPort)
 			}
 
+			// Get server type from container environment variables
+			serverType := "vanilla" // default
+			inspect, inspectErr := c.cli.ContainerInspect(ctx, container.ID)
+			if inspectErr == nil {
+				for _, env := range inspect.Config.Env {
+					if strings.HasPrefix(env, "TYPE=") {
+						serverType = strings.ToLower(strings.TrimPrefix(env, "TYPE="))
+						break
+					}
+				}
+			}
+
 			servers = append(servers, MinecraftServer{
 				ID:          container.ID[:12],
 				Name:        container.Names[0][1:], // Remove leading /
 				Status:      container.Status,
 				Image:       container.Image,
 				Port:        port,
+				Type:        serverType,
 				ContainerID: container.ID,
 			})
 		}
@@ -469,7 +501,7 @@ func (c *Client) GetFileFromContainer(ctx context.Context, containerID, containe
 
 // SaveFileToContainer saves file content to a container
 func (c *Client) SaveFileToContainer(ctx context.Context, containerID, containerPath string, content []byte) error {
-	log.Printf("Saving file content to container %s: %s", containerID, containerPath)
+	log.Printf("Saving file to container %s: %s", containerID, containerPath)
 
 	// Check if container is running
 	inspect, err := c.cli.ContainerInspect(ctx, containerID)
@@ -481,15 +513,15 @@ func (c *Client) SaveFileToContainer(ctx context.Context, containerID, container
 		return fmt.Errorf("container %s is not running", containerID)
 	}
 
-	// Use echo command to write file content
-	// We need to escape the content properly for shell execution
-	escapedContent := strings.ReplaceAll(string(content), "'", "'\"'\"'")
-	cmd := []string{"sh", "-c", fmt.Sprintf("echo '%s' > %s", escapedContent, containerPath)}
+	// Use tee command to write file content
+	// Create a temporary script that writes the content
+	cmd := []string{"sh", "-c", fmt.Sprintf("cat > %s", containerPath)}
 	log.Printf("Executing command in container: %v", cmd)
 
 	// Create exec instance
 	execConfig := container.ExecOptions{
 		Cmd:          cmd,
+		AttachStdin:  true,
 		AttachStdout: true,
 		AttachStderr: true,
 	}
@@ -506,7 +538,13 @@ func (c *Client) SaveFileToContainer(ctx context.Context, containerID, container
 	}
 	defer attachResp.Close()
 
-	// Read the output
+	// Write the content to stdin
+	go func() {
+		defer attachResp.CloseWrite()
+		attachResp.Conn.Write(content)
+	}()
+
+	// Read any output
 	var stdout, stderr bytes.Buffer
 	_, err = stdcopy.StdCopy(&stdout, &stderr, attachResp.Reader)
 	if err != nil {
@@ -519,6 +557,6 @@ func (c *Client) SaveFileToContainer(ctx context.Context, containerID, container
 		return fmt.Errorf("save command failed: %s", stderr.String())
 	}
 
-	log.Printf("Successfully saved file to container %s at path %s", containerID, containerPath)
+	log.Printf("Successfully saved file to container %s: %s", containerID, containerPath)
 	return nil
 }

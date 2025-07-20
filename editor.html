@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MinePanel - File Editor</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background: #1e1e1e;
+        color: #fff;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      .header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+        padding: 15px;
+        background: #2d2d2d;
+        border-radius: 8px;
+      }
+      .file-info {
+        color: #4caf50;
+      }
+      .file-path {
+        color: #ccc;
+        font-size: 14px;
+        margin-top: 5px;
+      }
+      .actions {
+        display: flex;
+        gap: 10px;
+      }
+      .btn {
+        background: #4caf50;
+        color: white;
+        border: none;
+        padding: 8px 16px;
+        cursor: pointer;
+        border-radius: 4px;
+        font-size: 14px;
+        transition: background 0.3s;
+      }
+      .btn:hover {
+        background: #45a049;
+      }
+      .btn:disabled {
+        background: #666;
+        cursor: not-allowed;
+      }
+      .btn-secondary {
+        background: #2196f3;
+      }
+      .btn-secondary:hover {
+        background: #1976d2;
+      }
+      .editor-container {
+        background: #2d2d2d;
+        border-radius: 8px;
+        border: 1px solid #444;
+        height: 70vh;
+        display: flex;
+        flex-direction: column;
+      }
+      .editor-toolbar {
+        padding: 10px 15px;
+        border-bottom: 1px solid #444;
+        background: #333;
+        border-radius: 8px 8px 0 0;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+      .editor-content {
+        flex: 1;
+        position: relative;
+      }
+      #editor {
+        width: 100%;
+        height: 100%;
+        border: none;
+        background: #1e1e1e;
+        color: #fff;
+        font-family: "Courier New", monospace;
+        font-size: 14px;
+        padding: 15px;
+        resize: none;
+        outline: none;
+      }
+      .status {
+        padding: 10px 15px;
+        background: #333;
+        border-radius: 0 0 8px 8px;
+        border-top: 1px solid #444;
+        color: #ccc;
+        font-size: 12px;
+      }
+      .loading {
+        text-align: center;
+        color: #ccc;
+        margin: 20px 0;
+      }
+      .error {
+        color: #f44336;
+        text-align: center;
+        margin: 10px 0;
+        padding: 10px;
+        background: rgba(244, 67, 54, 0.1);
+        border-radius: 4px;
+      }
+      .success {
+        color: #4caf50;
+        text-align: center;
+        margin: 10px 0;
+        padding: 10px;
+        background: rgba(76, 175, 80, 0.1);
+        border-radius: 4px;
+      }
+      .editor-stats {
+        color: #666;
+        font-size: 12px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <div>
+          <div class="file-info">
+            <span id="fileName">Loading...</span>
+          </div>
+          <div class="file-path" id="filePath"></div>
+        </div>
+        <div class="actions">
+          <button class="btn" id="saveBtn" onclick="saveFile()" disabled>
+            💾 Save
+          </button>
+          <button class="btn btn-secondary" onclick="goBack()">
+            ← Back to Files
+          </button>
+        </div>
+      </div>
+
+      <div id="loading" class="loading" style="display: none">
+        Loading file content...
+      </div>
+
+      <div id="error" class="error" style="display: none"></div>
+      <div id="success" class="success" style="display: none"></div>
+
+      <div class="editor-container" id="editorContainer" style="display: none">
+        <div class="editor-toolbar">
+          <span>File Editor</span>
+          <div class="editor-stats">
+            <span id="stats">Lines: 0, Characters: 0</span>
+          </div>
+        </div>
+        <div class="editor-content">
+          <textarea
+            id="editor"
+            placeholder="File content will appear here..."
+          ></textarea>
+        </div>
+        <div class="status">
+          <span id="statusText">Ready</span>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      let currentServer = "";
+      let currentPath = "";
+      let originalContent = "";
+      let hasChanges = false;
+
+      // Get URL parameters
+      function getUrlParams() {
+        const params = new URLSearchParams(window.location.search);
+        return {
+          server: params.get("server"),
+          path: params.get("path"),
+        };
+      }
+
+      // Initialize editor
+      document.addEventListener("DOMContentLoaded", () => {
+        const params = getUrlParams();
+
+        if (!params.server || !params.path) {
+          document.getElementById("error").textContent =
+            "Missing server or path parameter";
+          document.getElementById("error").style.display = "block";
+          return;
+        }
+
+        currentServer = params.server;
+        currentPath = params.path;
+
+        loadFile();
+        setupEditor();
+      });
+
+      // Setup editor event listeners
+      function setupEditor() {
+        const editor = document.getElementById("editor");
+        const saveBtn = document.getElementById("saveBtn");
+
+        editor.addEventListener("input", () => {
+          hasChanges = editor.value !== originalContent;
+          saveBtn.disabled = !hasChanges;
+          updateStats();
+          updateStatus();
+        });
+
+        // Auto-save with Ctrl+S
+        document.addEventListener("keydown", (e) => {
+          if (e.ctrlKey && e.key === "s") {
+            e.preventDefault();
+            if (hasChanges) {
+              saveFile();
+            }
+          }
+        });
+      }
+
+      // Load file content
+      async function loadFile() {
+        const loading = document.getElementById("loading");
+        const error = document.getElementById("error");
+        const editorContainer = document.getElementById("editorContainer");
+        const fileName = document.getElementById("fileName");
+        const filePath = document.getElementById("filePath");
+        const editor = document.getElementById("editor");
+
+        loading.style.display = "block";
+        error.style.display = "none";
+        editorContainer.style.display = "none";
+
+        try {
+          const response = await fetch(
+            `http://localhost:8080/api/v1/minecraft/${currentServer}/files/download?path=${encodeURIComponent(
+              currentPath
+            )}`
+          );
+
+          if (!response.ok) {
+            throw new Error(`Failed to load file: ${response.status}`);
+          }
+
+          const content = await response.text();
+          originalContent = content;
+          editor.value = content;
+
+          // Update UI
+          fileName.textContent = currentPath.split("/").pop();
+          filePath.textContent = currentPath;
+
+          hasChanges = false;
+          document.getElementById("saveBtn").disabled = true;
+
+          updateStats();
+          updateStatus();
+
+          editorContainer.style.display = "flex";
+        } catch (err) {
+          console.error("Error loading file:", err);
+          error.textContent = "Error loading file: " + err.message;
+          error.style.display = "block";
+        } finally {
+          loading.style.display = "none";
+        }
+      }
+
+      // Save file
+      async function saveFile() {
+        const saveBtn = document.getElementById("saveBtn");
+        const error = document.getElementById("error");
+        const success = document.getElementById("success");
+        const editor = document.getElementById("editor");
+
+        if (!hasChanges) {
+          return;
+        }
+
+        saveBtn.disabled = true;
+        saveBtn.textContent = "💾 Saving...";
+        error.style.display = "none";
+        success.style.display = "none";
+
+        try {
+          const response = await fetch(
+            `http://localhost:8080/api/v1/minecraft/${currentServer}/files/save?path=${encodeURIComponent(
+              currentPath
+            )}`,
+            {
+              method: "PUT",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                content: editor.value,
+              }),
+            }
+          );
+
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || "Failed to save file");
+          }
+
+          originalContent = editor.value;
+          hasChanges = false;
+
+          success.textContent = "File saved successfully!";
+          success.style.display = "block";
+
+          updateStatus();
+
+          // Hide success message after 3 seconds
+          setTimeout(() => {
+            success.style.display = "none";
+          }, 3000);
+        } catch (err) {
+          console.error("Error saving file:", err);
+          error.textContent = "Error saving file: " + err.message;
+          error.style.display = "block";
+        } finally {
+          saveBtn.disabled = !hasChanges;
+          saveBtn.textContent = "💾 Save";
+        }
+      }
+
+      // Update editor statistics
+      function updateStats() {
+        const editor = document.getElementById("editor");
+        const stats = document.getElementById("stats");
+
+        const content = editor.value;
+        const lines = content.split("\n").length;
+        const chars = content.length;
+
+        stats.textContent = `Lines: ${lines}, Characters: ${chars}`;
+      }
+
+      // Update status
+      function updateStatus() {
+        const statusText = document.getElementById("statusText");
+
+        if (hasChanges) {
+          statusText.textContent = "Modified (unsaved changes)";
+        } else {
+          statusText.textContent = "Ready";
+        }
+      }
+
+      // Go back to file browser
+      function goBack() {
+        if (hasChanges) {
+          if (
+            !confirm(
+              "You have unsaved changes. Are you sure you want to leave?"
+            )
+          ) {
+            return;
+          }
+        }
+
+        window.close();
+        // Fallback if window.close() doesn't work
+        window.history.back();
+      }
+
+      // Warn about unsaved changes when leaving
+      window.addEventListener("beforeunload", (e) => {
+        if (hasChanges) {
+          e.preventDefault();
+          e.returnValue = "";
+        }
+      });
+    </script>
+  </body>
+</html>

@@ -89,7 +89,7 @@
     </div>
 
     <script>
-      const serverName = "test";
+      const serverName = "test-3";
       let currentPath = "/data"; // Start from Minecraft server directory
 
       // Build breadcrumb navigation
@@ -200,39 +200,43 @@
         }
       }
 
-      // Check if a file is editable (text-based)
-      function isEditableFile(filename) {
+      // Helper function to check if file is editable
+      function isEditableFile(fileName) {
         const editableExtensions = [
           ".properties",
+          ".txt",
+          ".log",
           ".json",
           ".yml",
           ".yaml",
-          ".txt",
-          ".log",
           ".cfg",
           ".conf",
-          ".config",
           ".ini",
           ".sh",
           ".bat",
           ".md",
         ];
-
-        const ext = filename.toLowerCase().substring(filename.lastIndexOf("."));
+        const extension = fileName
+          .toLowerCase()
+          .substring(fileName.lastIndexOf("."));
         return (
-          editableExtensions.includes(ext) ||
-          filename === "whitelist.json" ||
-          filename === "ops.json" ||
-          filename === "banned-players.json" ||
-          filename === "banned-ips.json"
+          editableExtensions.includes(extension) ||
+          fileName === "server.properties" ||
+          fileName === "ops.json" ||
+          fileName === "whitelist.json"
         );
       }
 
       // Open file in editor
       function openFileEditor(filePath) {
-        window.location.href = `file-editor.html?path=${encodeURIComponent(
-          filePath
-        )}`;
+        const serverName =
+          new URLSearchParams(window.location.search).get("server") || "test";
+        window.open(
+          `editor.html?server=${serverName}&path=${encodeURIComponent(
+            filePath
+          )}`,
+          "_blank"
+        );
       }
 
       // Initialize browser

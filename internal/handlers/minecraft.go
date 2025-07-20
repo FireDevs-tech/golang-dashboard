@@ -28,6 +28,7 @@ type MinecraftHandler struct {
 type CreateServerRequest struct {
 	Name string `json:"name" binding:"required"`
 	Port string `json:"port" binding:"required"`
+	Type string `json:"type" binding:"required"` // "vanilla", "paper", "fabric", "forge"
 }
 
 type ServerResponse struct {
@@ -35,6 +36,7 @@ type ServerResponse struct {
 	Name    string `json:"name"`
 	Status  string `json:"status"`
 	Port    string `json:"port"`
+	Type    string `json:"type,omitempty"`
 	Message string `json:"message,omitempty"`
 }
 
@@ -52,13 +54,13 @@ func (h *MinecraftHandler) CreateServer(c *gin.Context) {
 		return
 	}
 
-	log.Printf("Received create server request - Name: %s, Port: %s", req.Name, req.Port)
+	log.Printf("Received create server request - Name: %s, Port: %s, Type: %s", req.Name, req.Port, req.Type)
 
 	// Start container creation in background
 	go func() {
 		log.Printf("Starting background container creation for: %s", req.Name)
 		ctx := context.Background() // No timeout for background process
-		server, err := h.dockerClient.CreateMinecraftServer(ctx, req.Name, req.Port)
+		server, err := h.dockerClient.CreateMinecraftServer(ctx, req.Name, req.Port, req.Type)
 		if err != nil {
 			log.Printf("Background container creation failed for %s: %v", req.Name, err)
 		} else {
@@ -74,6 +76,7 @@ func (h *MinecraftHandler) CreateServer(c *gin.Context) {
 		Name:    req.Name,
 		Status:  "creating",
 		Port:    req.Port,
+		Type:    req.Type,
 		Message: "Server creation started successfully",
 	})
 }
@@ -173,6 +176,7 @@ func (h *MinecraftHandler) ListServers(c *gin.Context) {
 			Name:   server.Name,
 			Status: server.Status,
 			Port:   server.Port,
+			Type:   server.Type,
 		})
 	}
 
