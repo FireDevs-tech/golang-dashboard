@@ -560,3 +560,22 @@ func (c *Client) SaveFileToContainer(ctx context.Context, containerID, container
 	log.Printf("Successfully saved file to container %s: %s", containerID, containerPath)
 	return nil
 }
+
+// GetServerType returns the server type from the container environment variables
+func (c *Client) GetServerType(ctx context.Context, containerID string) (string, error) {
+	inspect, err := c.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect container: %w", err)
+	}
+
+	// Look for TYPE environment variable
+	for _, env := range inspect.Config.Env {
+		if strings.HasPrefix(env, "TYPE=") {
+			serverType := strings.ToLower(strings.TrimPrefix(env, "TYPE="))
+			return serverType, nil
+		}
+	}
+
+	// Default to vanilla if no TYPE is set
+	return "vanilla", nil
+}

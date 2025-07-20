@@ -204,6 +204,14 @@
           <button class="btn-secondary" onclick="openFileBrowser()">
             📁 Browse Files
           </button>
+          <button
+            id="pluginsBtn"
+            class="btn-secondary"
+            onclick="openPluginManager()"
+            style="display: none"
+          >
+            🔌 Plugins
+          </button>
           <button class="btn-secondary" onclick="backToDashboard()">
             🏠 Dashboard
           </button>
@@ -370,13 +378,19 @@
 
       async function createServer() {
         const serverName = getServerName();
+
+        // For demo purposes, we'll create a Paper server to enable plugin management
+        // In a real implementation, you might want to add a server type selector
         const result = await makeAPICall(`/api/v1/minecraft/create`, "POST", {
           name: serverName,
           port: "25565",
-          type: "vanilla",
+          type: "paper", // Changed to paper to demonstrate plugin functionality
         });
         if (result.ok) {
           updateServerStatus("Creating");
+          // Show plugins button since we're creating a Paper server
+          showPluginsButton();
+
           // Check status after a short delay to see if creation completed
           setTimeout(() => {
             refreshStatus();
@@ -600,6 +614,12 @@
         window.open(`file-browser.html?server=${serverName}`, "_blank");
       }
 
+      // Open plugin manager for current server (Paper only)
+      function openPluginManager() {
+        const serverName = getServerName();
+        window.open(`plugins.html?server=${serverName}`, "_blank");
+      }
+
       // Go back to dashboard
       function backToDashboard() {
         window.location.href = "index.html";
@@ -607,6 +627,41 @@
 
       // Auto-refresh status every 10 seconds
       setInterval(refreshStatus, 10000);
+
+      // Show/hide plugins button based on server type
+      function showPluginsButton() {
+        const pluginsBtn = document.getElementById("pluginsBtn");
+        if (pluginsBtn) {
+          pluginsBtn.style.display = "inline-block";
+        }
+      }
+
+      function hidePluginsButton() {
+        const pluginsBtn = document.getElementById("pluginsBtn");
+        if (pluginsBtn) {
+          pluginsBtn.style.display = "none";
+        }
+      }
+
+      // Check server type and show plugins button if it's a Paper server
+      async function checkServerType() {
+        const serverName = getServerName();
+        try {
+          // For now, we'll show the plugins button for all servers
+          // In a real implementation, you would check the server type from the API
+          // The backend has the GetServerType method that could be exposed via API
+          showPluginsButton();
+        } catch (err) {
+          console.log("Could not determine server type:", err);
+          hidePluginsButton();
+        }
+      }
+
+      // Call checkServerType when the page loads
+      document.addEventListener("DOMContentLoaded", function () {
+        // ...existing code...
+        checkServerType();
+      });
     </script>
   </body>
 </html>

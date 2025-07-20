@@ -330,6 +330,11 @@
                 server.id
               }')">📁 Files</button>
               ${
+                server.type === "paper"
+                  ? `<button class="btn btn-small btn-secondary" onclick="openPlugins('${server.id}')">🔌 Plugins</button>`
+                  : ""
+              }
+              ${
                 server.status === "running"
                   ? `<button class="btn btn-small btn-danger" onclick="stopServer('${server.id}')">⏹️ Stop</button>`
                   : `<button class="btn btn-small" onclick="startServer('${server.id}')">▶️ Start</button>`
@@ -349,6 +354,11 @@
       // Open file browser
       function openFiles(serverId) {
         window.open(`file-browser.html?server=${serverId}`, "_blank");
+      }
+
+      // Open plugin manager (Paper servers only)
+      function openPlugins(serverId) {
+        window.open(`plugins.html?server=${serverId}`, "_blank");
       }
 
       // Start server
