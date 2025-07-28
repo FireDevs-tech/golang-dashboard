@@ -223,6 +223,9 @@
             <div>
               <!-- Logs always streaming; status hidden -->
               <!-- Log connect/disconnect controls removed -->
+              <button class="btn-secondary" onclick="loadRecentLogs()">
+                Refresh Logs
+              </button>
               <button class="btn-secondary" onclick="clearLogs()">Clear</button>
             </div>
           </div>
@@ -408,6 +411,11 @@
                 statusResult.data.status.toLowerCase() === "running"
               ) {
                 if (!isLogsConnected) {
+                  // Clear the container first and show loading message
+                  const container = document.getElementById("logContainer");
+                  container.innerHTML = `<div class="log-line">Server created and running! Loading recent logs...</div>`;
+
+                  // Automatically load recent logs and connect to live stream
                   connectToLogs();
                 }
               }
@@ -428,6 +436,11 @@
             // Auto-connect to logs after server starts (with delay to ensure container is ready)
             setTimeout(() => {
               if (!isLogsConnected) {
+                // Clear the container first and show loading message
+                const container = document.getElementById("logContainer");
+                container.innerHTML = `<div class="log-line">Server starting... Loading recent logs...</div>`;
+
+                // Automatically load recent logs and then connect to live stream
                 connectToLogs();
               }
             }, 2000);
@@ -463,6 +476,18 @@
           const currentStatus = result.data.status.toLowerCase();
           updateServerStatus(result.data.status);
 
+          // Auto-connect to logs if server is running and we're not already connected
+          if (currentStatus === "running" && !isLogsConnected) {
+            // Give a small delay to ensure UI is ready
+            setTimeout(() => {
+              if (!isLogsConnected) {
+                const container = document.getElementById("logContainer");
+                container.innerHTML = `<div class="log-line">Server is running! Loading recent logs...</div>`;
+                connectToLogs();
+              }
+            }, 500);
+          }
+
           // Auto-disconnect logs if server is not running
           if (isLogsConnected && currentStatus !== "running") {
             addLogLine(`Server is ${currentStatus}, disconnecting logs...`);
@@ -479,6 +504,72 @@
       }
 
       // Manual log toggling removed; logs connect automatically when server runs
+
+      async function loadRecentLogs() {
+        const serverName = getServerName();
+        console.log("DEBUG: loadRecentLogs() called for server:", serverName);
+
+        try {
+          addLogLine("Loading recent logs...");
+          const result = await makeAPICall(
+            `/api/v1/minecraft/${serverName}/logs/recent?lines=50`,
+            "GET",
+            null,
+            false
+          );
+
+          if (result.ok && result.data.logs) {
+            console.log(
+              "DEBUG: Loaded",
+              result.data.logs.length,
+              "recent log lines"
+            );
+            addLogLine(`Loaded ${result.data.logs.length} recent log entries`);
+
+            // Add each log line to the display
+            result.data.logs.forEach((logLine) => {
+              // Clean up Docker log timestamps for better readability
+              let cleanLogLine = logLine.replace(
+                /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z\s+/,
+                ""
+              );
+
+              // Determine log type based on content
+              let logType = "info";
+              if (
+                cleanLogLine.toLowerCase().includes("error") ||
+                cleanLogLine.toLowerCase().includes("exception")
+              ) {
+                logType = "error";
+              } else if (cleanLogLine.toLowerCase().includes("warn")) {
+                logType = "warning";
+              }
+
+              // Add log line without the timestamp prefix from addLogLine
+              const container = document.getElementById("logContainer");
+              const logLineEl = document.createElement("div");
+              logLineEl.className = `log-line ${logType}`;
+              logLineEl.textContent = cleanLogLine;
+              container.appendChild(logLineEl);
+            });
+
+            // Scroll to bottom
+            const container = document.getElementById("logContainer");
+            container.scrollTop = container.scrollHeight;
+
+            addLogLine("Recent logs loaded, connecting to live stream...");
+          } else {
+            console.log(
+              "DEBUG: No recent logs available or error:",
+              result.data
+            );
+            addLogLine("No recent logs available or server not found");
+          }
+        } catch (error) {
+          console.log("DEBUG: Error loading recent logs:", error);
+          addLogLine("Failed to load recent logs: " + error.message, "error");
+        }
+      }
 
       function connectToLogs() {
         const serverName = getServerName();
@@ -513,67 +604,26 @@
               return;
             }
 
-            console.log(
-              "DEBUG: Server is running, attempting WebSocket connection"
-            );
-            updateWSStatus("connecting");
-            addLogLine(`Connecting to logs for server: ${serverName}`);
-
-            const wsUrl = `ws://localhost:8080/api/v1/minecraft/${serverName}/logs`;
-            console.log("DEBUG: WebSocket URL:", wsUrl);
-            socket = new WebSocket(wsUrl);
-
-            socket.onopen = function (event) {
-              console.log("DEBUG: WebSocket onopen triggered", event);
-              isLogsConnected = true;
-              updateWSStatus("connected");
-              addLogLine(
-                `WebSocket connection established for ${serverName}`,
-                "info"
-              );
-            };
-
-            socket.onmessage = function (event) {
-              console.log("DEBUG: WebSocket message received:", event.data);
-              // Clean up Docker log timestamps for better readability
-              let logData = event.data;
-              logData = logData.replace(
-                /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z\s+/,
-                ""
-              );
-
-              console.log("DEBUG: Cleaned log data:", logData);
-
-              // Determine log type based on content
-              let logType = "info";
-              if (
-                logData.toLowerCase().includes("error") ||
-                logData.toLowerCase().includes("exception")
-              ) {
-                logType = "error";
-              } else if (logData.toLowerCase().includes("warn")) {
-                logType = "warning";
-              }
-
-              addLogLine(logData, logType);
-            };
-
-            socket.onclose = function (event) {
-              console.log("DEBUG: WebSocket onclose triggered", event);
-              isLogsConnected = false;
-              updateWSStatus("disconnected");
-              addLogLine("WebSocket connection closed");
-            };
-
-            socket.onerror = function (error) {
-              console.log("DEBUG: WebSocket onerror triggered", error);
-              isLogsConnected = false;
-              updateWSStatus("disconnected");
-              addLogLine(
-                `WebSocket connection failed - make sure the server is running`,
-                "error"
-              );
-            };
+            console.log("DEBUG: Server is running, loading recent logs first");
+            // First load recent logs, then start WebSocket connection
+            loadRecentLogs()
+              .then(() => {
+                console.log(
+                  "DEBUG: Recent logs loaded, starting WebSocket connection"
+                );
+                startWebSocketConnection(serverName);
+              })
+              .catch((error) => {
+                console.log(
+                  "DEBUG: Error loading recent logs, starting WebSocket anyway:",
+                  error
+                );
+                addLogLine(
+                  "Warning: Could not load recent logs, starting live stream...",
+                  "warning"
+                );
+                startWebSocketConnection(serverName);
+              });
           })
           .catch((error) => {
             console.log("DEBUG: Error checking server status:", error);
@@ -582,6 +632,68 @@
               "error"
             );
           });
+      }
+
+      function startWebSocketConnection(serverName) {
+        console.log(
+          "DEBUG: Starting WebSocket connection for server:",
+          serverName
+        );
+        updateWSStatus("connecting");
+        addLogLine(`Connecting to live logs for server: ${serverName}`);
+
+        const wsUrl = `ws://localhost:8080/api/v1/minecraft/${serverName}/logs`;
+        console.log("DEBUG: WebSocket URL:", wsUrl);
+        socket = new WebSocket(wsUrl);
+
+        socket.onopen = function (event) {
+          console.log("DEBUG: WebSocket onopen triggered", event);
+          isLogsConnected = true;
+          updateWSStatus("connected");
+          addLogLine(`Live log stream connected for ${serverName}`, "info");
+        };
+
+        socket.onmessage = function (event) {
+          console.log("DEBUG: WebSocket message received:", event.data);
+          // Clean up Docker log timestamps for better readability
+          let logData = event.data;
+          logData = logData.replace(
+            /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d+Z\s+/,
+            ""
+          );
+
+          console.log("DEBUG: Cleaned log data:", logData);
+
+          // Determine log type based on content
+          let logType = "info";
+          if (
+            logData.toLowerCase().includes("error") ||
+            logData.toLowerCase().includes("exception")
+          ) {
+            logType = "error";
+          } else if (logData.toLowerCase().includes("warn")) {
+            logType = "warning";
+          }
+
+          addLogLine(logData, logType);
+        };
+
+        socket.onclose = function (event) {
+          console.log("DEBUG: WebSocket onclose triggered", event);
+          isLogsConnected = false;
+          updateWSStatus("disconnected");
+          addLogLine("Live log stream disconnected");
+        };
+
+        socket.onerror = function (error) {
+          console.log("DEBUG: WebSocket onerror triggered", error);
+          isLogsConnected = false;
+          updateWSStatus("disconnected");
+          addLogLine(
+            `Live log stream connection failed - make sure the server is running`,
+            "error"
+          );
+        };
       }
 
       function disconnectFromLogs() {
@@ -600,6 +712,11 @@
         const serverName = getServerName();
         const container = document.getElementById("logContainer");
         container.innerHTML = `<div class="log-line">Logs cleared - Ready to manage server '${serverName}'...</div>`;
+
+        // If server is running and logs are connected, offer to reload recent logs
+        if (isLogsConnected) {
+          addLogLine("Logs cleared. Recent logs can be reloaded from server.");
+        }
       }
 
       // Get server name from URL parameters

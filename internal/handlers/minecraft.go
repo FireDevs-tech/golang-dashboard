@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -274,6 +275,50 @@ func (h *MinecraftHandler) StreamServerLogs(c *gin.Context) {
 			}
 		}
 	}
+}
+
+// GetRecentLogs handles requests for recent server logs (non-streaming)
+func (h *MinecraftHandler) GetRecentLogs(c *gin.Context) {
+	serverID := c.Param("id")
+	if serverID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Server ID is required"})
+		return
+	}
+
+	// Get lines parameter, default to 100
+	linesStr := c.DefaultQuery("lines", "100")
+	lines := 100
+	if l, err := strconv.Atoi(linesStr); err == nil && l > 0 {
+		lines = l
+		// Limit to 500 lines maximum to prevent excessive memory usage
+		if lines > 500 {
+			lines = 500
+		}
+	}
+
+	log.Printf("DEBUG: Getting recent logs for server: %s, lines: %d", serverID, lines)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Get recent logs from Docker container
+	logLines, err := h.dockerClient.GetRecentContainerLogs(ctx, serverID, lines)
+	if err != nil {
+		log.Printf("Error getting recent logs for server %s: %v", serverID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to retrieve recent logs",
+		})
+		return
+	}
+
+	log.Printf("DEBUG: Retrieved %d recent log lines for server: %s", len(logLines), serverID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"logs":   logLines,
+		"count":  len(logLines),
+		"server": serverID,
+		"lines":  lines,
+	})
 }
 
 // ListServerFiles handles file browsing requests

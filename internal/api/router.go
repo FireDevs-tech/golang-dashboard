@@ -39,6 +39,7 @@ func NewRouter(dockerClient *docker.Client) *gin.Engine {
 			minecraft.POST("/:id/stop", minecraftHandler.StopServer)
 			minecraft.GET("/:id/status", minecraftHandler.GetServerStatus)
 			minecraft.GET("/servers", minecraftHandler.ListServers)
+			minecraft.GET("/:id/logs/recent", minecraftHandler.GetRecentLogs)         // Get recent logs (REST)
 			minecraft.GET("/:id/logs", minecraftHandler.StreamServerLogs)             // WebSocket endpoint
 			minecraft.GET("/:id/files", minecraftHandler.ListServerFiles)             // File browser endpoint
 			minecraft.GET("/:id/files/download", minecraftHandler.DownloadServerFile) // File download endpoint

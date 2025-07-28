@@ -51,11 +51,9 @@ func (c *Client) CreateMinecraftServer(ctx context.Context, serverName, serverPo
 
 	log.Printf("Starting container creation for server: %s on port: %s with type: %s", serverName, serverPort, serverType)
 
-	// Check if image exists locally first
 	_, err := c.cli.ImageInspect(ctx, imageName)
 	if err != nil {
 		log.Printf("Image %s not found locally, pulling...", imageName)
-		// Pull the image if it doesn't exist
 		reader, pullErr := c.cli.ImagePull(ctx, imageName, image.PullOptions{})
 		if pullErr != nil {
 			log.Printf("Failed to pull image %s: %v", imageName, pullErr)
@@ -63,20 +61,15 @@ func (c *Client) CreateMinecraftServer(ctx context.Context, serverName, serverPo
 		}
 		defer reader.Close()
 
-		// Consume the reader to complete the pull
 		log.Printf("Pulling image %s...", imageName)
 		io.Copy(io.Discard, reader)
 		log.Printf("Successfully pulled image %s", imageName)
 	} else {
 		log.Printf("Image %s already exists locally", imageName)
 	}
-
-	// Create exposed ports
 	exposedPorts := nat.PortSet{
 		"25565/tcp": struct{}{},
 	}
-
-	// Create port bindings
 	portBindings := nat.PortMap{
 		"25565/tcp": []nat.PortBinding{
 			{
@@ -88,7 +81,6 @@ func (c *Client) CreateMinecraftServer(ctx context.Context, serverName, serverPo
 
 	log.Printf("Creating container configuration for %s", serverName)
 
-	// Create environment variables based on server type
 	env := []string{
 		"EULA=TRUE",
 		fmt.Sprintf("SERVER_NAME=%s", serverName),
@@ -304,6 +296,66 @@ func (c *Client) StreamContainerLogs(ctx context.Context, containerID string, lo
 
 	log.Printf("Log streaming ended for container: %s", containerID)
 	return nil
+}
+
+// GetRecentContainerLogs gets recent logs from a container (non-streaming)
+func (c *Client) GetRecentContainerLogs(ctx context.Context, containerID string, lines int) ([]string, error) {
+	log.Printf("DEBUG: GetRecentContainerLogs called for container: %s, lines: %d", containerID, lines)
+
+	// First check if container exists
+	_, err := c.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		log.Printf("DEBUG: Container inspection failed for %s: %v", containerID, err)
+		return nil, fmt.Errorf("container not found or not accessible: %w", err)
+	}
+
+	// Convert lines to string for Docker API
+	tailLines := "all"
+	if lines > 0 {
+		tailLines = strconv.Itoa(lines)
+	}
+
+	options := container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     false, // Don't follow, just get existing logs
+		Timestamps: true,
+		Tail:       tailLines,
+	}
+
+	log.Printf("DEBUG: Getting recent container logs with options: %+v", options)
+	reader, err := c.cli.ContainerLogs(ctx, containerID, options)
+	if err != nil {
+		log.Printf("Failed to get recent container logs for %s: %v", containerID, err)
+		return nil, err
+	}
+	defer reader.Close()
+
+	// Demultiplex Docker stream and collect lines
+	pr, pw := io.Pipe()
+	go func() {
+		defer pw.Close()
+		if _, err := stdcopy.StdCopy(pw, pw, reader); err != nil {
+			log.Printf("Error copying Docker logs for container %s: %v", containerID, err)
+		}
+	}()
+
+	var logLines []string
+	scanner := bufio.NewScanner(pr)
+	for scanner.Scan() {
+		logLine := scanner.Text()
+		if len(strings.TrimSpace(logLine)) > 0 {
+			logLines = append(logLines, logLine)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Printf("Error scanning recent logs for container %s: %v", containerID, err)
+		return nil, err
+	}
+
+	log.Printf("DEBUG: Retrieved %d recent log lines for container: %s", len(logLines), containerID)
+	return logLines, nil
 }
 
 // FileInfo represents a file or directory in the container
