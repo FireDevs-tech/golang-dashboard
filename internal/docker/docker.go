@@ -29,6 +29,7 @@ type MinecraftServer struct {
 	Status      string `json:"status"`
 	Image       string `json:"image"`
 	Port        string `json:"port"`
+	Type        string `json:"type"`
 	ContainerID string `json:"container_id"`
 }
 
@@ -45,16 +46,14 @@ func (c *Client) Close() error {
 	return c.cli.Close()
 }
 
-func (c *Client) CreateMinecraftServer(ctx context.Context, serverName, serverPort string) (*MinecraftServer, error) {
+func (c *Client) CreateMinecraftServer(ctx context.Context, serverName, serverPort, serverType string) (*MinecraftServer, error) {
 	imageName := "itzg/minecraft-server:latest"
 
-	log.Printf("Starting container creation for server: %s on port: %s", serverName, serverPort)
+	log.Printf("Starting container creation for server: %s on port: %s with type: %s", serverName, serverPort, serverType)
 
-	// Check if image exists locally first
 	_, err := c.cli.ImageInspect(ctx, imageName)
 	if err != nil {
 		log.Printf("Image %s not found locally, pulling...", imageName)
-		// Pull the image if it doesn't exist
 		reader, pullErr := c.cli.ImagePull(ctx, imageName, image.PullOptions{})
 		if pullErr != nil {
 			log.Printf("Failed to pull image %s: %v", imageName, pullErr)
@@ -62,20 +61,15 @@ func (c *Client) CreateMinecraftServer(ctx context.Context, serverName, serverPo
 		}
 		defer reader.Close()
 
-		// Consume the reader to complete the pull
 		log.Printf("Pulling image %s...", imageName)
 		io.Copy(io.Discard, reader)
 		log.Printf("Successfully pulled image %s", imageName)
 	} else {
 		log.Printf("Image %s already exists locally", imageName)
 	}
-
-	// Create exposed ports
 	exposedPorts := nat.PortSet{
 		"25565/tcp": struct{}{},
 	}
-
-	// Create port bindings
 	portBindings := nat.PortMap{
 		"25565/tcp": []nat.PortBinding{
 			{
@@ -87,15 +81,32 @@ func (c *Client) CreateMinecraftServer(ctx context.Context, serverName, serverPo
 
 	log.Printf("Creating container configuration for %s", serverName)
 
+	env := []string{
+		"EULA=TRUE",
+		fmt.Sprintf("SERVER_NAME=%s", serverName),
+		"VERSION=LATEST",
+	}
+
+	// Add server type specific environment variables
+	switch strings.ToLower(serverType) {
+	case "paper":
+		env = append(env, "TYPE=PAPER")
+	case "fabric":
+		env = append(env, "TYPE=FABRIC")
+	case "forge":
+		env = append(env, "TYPE=FORGE")
+	case "vanilla":
+		env = append(env, "TYPE=VANILLA")
+	default:
+		env = append(env, "TYPE=VANILLA") // Default to vanilla
+	}
+
+	log.Printf("Environment variables for %s: %v", serverName, env)
+
 	// Create container configuration
 	config := &container.Config{
-		Image: imageName,
-		Env: []string{
-			"EULA=TRUE",
-			"TYPE=VANILLA",
-			"VERSION=LATEST",
-			fmt.Sprintf("SERVER_NAME=%s", serverName),
-		},
+		Image:        imageName,
+		Env:          env,
 		ExposedPorts: exposedPorts,
 	}
 
@@ -166,12 +177,25 @@ func (c *Client) ListMinecraftServers(ctx context.Context) ([]MinecraftServer, e
 				port = fmt.Sprintf("%d", container.Ports[0].PublicPort)
 			}
 
+			// Get server type from container environment variables
+			serverType := "vanilla" // default
+			inspect, inspectErr := c.cli.ContainerInspect(ctx, container.ID)
+			if inspectErr == nil {
+				for _, env := range inspect.Config.Env {
+					if strings.HasPrefix(env, "TYPE=") {
+						serverType = strings.ToLower(strings.TrimPrefix(env, "TYPE="))
+						break
+					}
+				}
+			}
+
 			servers = append(servers, MinecraftServer{
 				ID:          container.ID[:12],
 				Name:        container.Names[0][1:], // Remove leading /
 				Status:      container.Status,
 				Image:       container.Image,
 				Port:        port,
+				Type:        serverType,
 				ContainerID: container.ID,
 			})
 		}
@@ -272,6 +296,66 @@ func (c *Client) StreamContainerLogs(ctx context.Context, containerID string, lo
 
 	log.Printf("Log streaming ended for container: %s", containerID)
 	return nil
+}
+
+// GetRecentContainerLogs gets recent logs from a container (non-streaming)
+func (c *Client) GetRecentContainerLogs(ctx context.Context, containerID string, lines int) ([]string, error) {
+	log.Printf("DEBUG: GetRecentContainerLogs called for container: %s, lines: %d", containerID, lines)
+
+	// First check if container exists
+	_, err := c.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		log.Printf("DEBUG: Container inspection failed for %s: %v", containerID, err)
+		return nil, fmt.Errorf("container not found or not accessible: %w", err)
+	}
+
+	// Convert lines to string for Docker API
+	tailLines := "all"
+	if lines > 0 {
+		tailLines = strconv.Itoa(lines)
+	}
+
+	options := container.LogsOptions{
+		ShowStdout: true,
+		ShowStderr: true,
+		Follow:     false, // Don't follow, just get existing logs
+		Timestamps: true,
+		Tail:       tailLines,
+	}
+
+	log.Printf("DEBUG: Getting recent container logs with options: %+v", options)
+	reader, err := c.cli.ContainerLogs(ctx, containerID, options)
+	if err != nil {
+		log.Printf("Failed to get recent container logs for %s: %v", containerID, err)
+		return nil, err
+	}
+	defer reader.Close()
+
+	// Demultiplex Docker stream and collect lines
+	pr, pw := io.Pipe()
+	go func() {
+		defer pw.Close()
+		if _, err := stdcopy.StdCopy(pw, pw, reader); err != nil {
+			log.Printf("Error copying Docker logs for container %s: %v", containerID, err)
+		}
+	}()
+
+	var logLines []string
+	scanner := bufio.NewScanner(pr)
+	for scanner.Scan() {
+		logLine := scanner.Text()
+		if len(strings.TrimSpace(logLine)) > 0 {
+			logLines = append(logLines, logLine)
+		}
+	}
+
+	if err := scanner.Err(); err != nil {
+		log.Printf("Error scanning recent logs for container %s: %v", containerID, err)
+		return nil, err
+	}
+
+	log.Printf("DEBUG: Retrieved %d recent log lines for container: %s", len(logLines), containerID)
+	return logLines, nil
 }
 
 // FileInfo represents a file or directory in the container
@@ -469,7 +553,7 @@ func (c *Client) GetFileFromContainer(ctx context.Context, containerID, containe
 
 // SaveFileToContainer saves file content to a container
 func (c *Client) SaveFileToContainer(ctx context.Context, containerID, containerPath string, content []byte) error {
-	log.Printf("Saving file content to container %s: %s", containerID, containerPath)
+	log.Printf("Saving file to container %s: %s", containerID, containerPath)
 
 	// Check if container is running
 	inspect, err := c.cli.ContainerInspect(ctx, containerID)
@@ -481,15 +565,15 @@ func (c *Client) SaveFileToContainer(ctx context.Context, containerID, container
 		return fmt.Errorf("container %s is not running", containerID)
 	}
 
-	// Use echo command to write file content
-	// We need to escape the content properly for shell execution
-	escapedContent := strings.ReplaceAll(string(content), "'", "'\"'\"'")
-	cmd := []string{"sh", "-c", fmt.Sprintf("echo '%s' > %s", escapedContent, containerPath)}
+	// Use tee command to write file content
+	// Create a temporary script that writes the content
+	cmd := []string{"sh", "-c", fmt.Sprintf("cat > %s", containerPath)}
 	log.Printf("Executing command in container: %v", cmd)
 
 	// Create exec instance
 	execConfig := container.ExecOptions{
 		Cmd:          cmd,
+		AttachStdin:  true,
 		AttachStdout: true,
 		AttachStderr: true,
 	}
@@ -506,7 +590,13 @@ func (c *Client) SaveFileToContainer(ctx context.Context, containerID, container
 	}
 	defer attachResp.Close()
 
-	// Read the output
+	// Write the content to stdin
+	go func() {
+		defer attachResp.CloseWrite()
+		attachResp.Conn.Write(content)
+	}()
+
+	// Read any output
 	var stdout, stderr bytes.Buffer
 	_, err = stdcopy.StdCopy(&stdout, &stderr, attachResp.Reader)
 	if err != nil {
@@ -519,6 +609,25 @@ func (c *Client) SaveFileToContainer(ctx context.Context, containerID, container
 		return fmt.Errorf("save command failed: %s", stderr.String())
 	}
 
-	log.Printf("Successfully saved file to container %s at path %s", containerID, containerPath)
+	log.Printf("Successfully saved file to container %s: %s", containerID, containerPath)
 	return nil
+}
+
+// GetServerType returns the server type from the container environment variables
+func (c *Client) GetServerType(ctx context.Context, containerID string) (string, error) {
+	inspect, err := c.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return "", fmt.Errorf("failed to inspect container: %w", err)
+	}
+
+	// Look for TYPE environment variable
+	for _, env := range inspect.Config.Env {
+		if strings.HasPrefix(env, "TYPE=") {
+			serverType := strings.ToLower(strings.TrimPrefix(env, "TYPE="))
+			return serverType, nil
+		}
+	}
+
+	// Default to vanilla if no TYPE is set
+	return "vanilla", nil
 }

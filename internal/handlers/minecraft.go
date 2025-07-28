@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,6 +29,7 @@ type MinecraftHandler struct {
 type CreateServerRequest struct {
 	Name string `json:"name" binding:"required"`
 	Port string `json:"port" binding:"required"`
+	Type string `json:"type" binding:"required"` // "vanilla", "paper", "fabric", "forge"
 }
 
 type ServerResponse struct {
@@ -35,6 +37,7 @@ type ServerResponse struct {
 	Name    string `json:"name"`
 	Status  string `json:"status"`
 	Port    string `json:"port"`
+	Type    string `json:"type,omitempty"`
 	Message string `json:"message,omitempty"`
 }
 
@@ -52,13 +55,13 @@ func (h *MinecraftHandler) CreateServer(c *gin.Context) {
 		return
 	}
 
-	log.Printf("Received create server request - Name: %s, Port: %s", req.Name, req.Port)
+	log.Printf("Received create server request - Name: %s, Port: %s, Type: %s", req.Name, req.Port, req.Type)
 
 	// Start container creation in background
 	go func() {
 		log.Printf("Starting background container creation for: %s", req.Name)
 		ctx := context.Background() // No timeout for background process
-		server, err := h.dockerClient.CreateMinecraftServer(ctx, req.Name, req.Port)
+		server, err := h.dockerClient.CreateMinecraftServer(ctx, req.Name, req.Port, req.Type)
 		if err != nil {
 			log.Printf("Background container creation failed for %s: %v", req.Name, err)
 		} else {
@@ -74,6 +77,7 @@ func (h *MinecraftHandler) CreateServer(c *gin.Context) {
 		Name:    req.Name,
 		Status:  "creating",
 		Port:    req.Port,
+		Type:    req.Type,
 		Message: "Server creation started successfully",
 	})
 }
@@ -173,6 +177,7 @@ func (h *MinecraftHandler) ListServers(c *gin.Context) {
 			Name:   server.Name,
 			Status: server.Status,
 			Port:   server.Port,
+			Type:   server.Type,
 		})
 	}
 
@@ -270,6 +275,50 @@ func (h *MinecraftHandler) StreamServerLogs(c *gin.Context) {
 			}
 		}
 	}
+}
+
+// GetRecentLogs handles requests for recent server logs (non-streaming)
+func (h *MinecraftHandler) GetRecentLogs(c *gin.Context) {
+	serverID := c.Param("id")
+	if serverID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Server ID is required"})
+		return
+	}
+
+	// Get lines parameter, default to 100
+	linesStr := c.DefaultQuery("lines", "100")
+	lines := 100
+	if l, err := strconv.Atoi(linesStr); err == nil && l > 0 {
+		lines = l
+		// Limit to 500 lines maximum to prevent excessive memory usage
+		if lines > 500 {
+			lines = 500
+		}
+	}
+
+	log.Printf("DEBUG: Getting recent logs for server: %s, lines: %d", serverID, lines)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	// Get recent logs from Docker container
+	logLines, err := h.dockerClient.GetRecentContainerLogs(ctx, serverID, lines)
+	if err != nil {
+		log.Printf("Error getting recent logs for server %s: %v", serverID, err)
+		c.JSON(http.StatusInternalServerError, gin.H{
+			"error": "Failed to retrieve recent logs",
+		})
+		return
+	}
+
+	log.Printf("DEBUG: Retrieved %d recent log lines for server: %s", len(logLines), serverID)
+
+	c.JSON(http.StatusOK, gin.H{
+		"logs":   logLines,
+		"count":  len(logLines),
+		"server": serverID,
+		"lines":  lines,
+	})
 }
 
 // ListServerFiles handles file browsing requests

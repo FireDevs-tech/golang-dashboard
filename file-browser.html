@@ -67,14 +67,42 @@
         background: #444;
         cursor: not-allowed;
       }
+      .nav-buttons {
+        margin-bottom: 20px;
+        text-align: center;
+      }
+      .btn-nav {
+        background: #6c757d;
+        color: #fff;
+        border: none;
+        padding: 10px 16px;
+        margin: 0 5px;
+        cursor: pointer;
+        border-radius: 4px;
+        text-decoration: none;
+        display: inline-block;
+      }
+      .btn-nav:hover {
+        background: #5a6268;
+      }
     </style>
   </head>
   <body>
     <div class="container">
       <div class="header">
         <h1>🔍 MinePanel - File Browser</h1>
-        <p>Browse Minecraft server files and folders</p>
+        <p id="serverInfo">Browse Minecraft server files and folders</p>
       </div>
+
+      <div class="nav-buttons">
+        <button class="btn-nav" onclick="backToDashboard()">
+          🏠 Dashboard
+        </button>
+        <button class="btn-nav" onclick="backToServerManagement()">
+          🎮 Server Management
+        </button>
+      </div>
+
       <div class="breadcrumb" id="breadcrumb"></div>
       <table class="file-list">
         <thead>
@@ -89,8 +117,17 @@
     </div>
 
     <script>
-      const serverName = "test";
+      // Get server name from URL parameters
+      function getServerName() {
+        const urlParams = new URLSearchParams(window.location.search);
+        return urlParams.get("server") || "test"; // Default to 'test' if no parameter
+      }
+
+      const serverName = getServerName();
       let currentPath = "/data"; // Start from Minecraft server directory
+
+      // Update page title with server name
+      document.title = `MinePanel - File Browser - ${serverName}`;
 
       // Build breadcrumb navigation
       function updateBreadcrumb() {
@@ -200,43 +237,62 @@
         }
       }
 
-      // Check if a file is editable (text-based)
-      function isEditableFile(filename) {
+      // Helper function to check if file is editable
+      function isEditableFile(fileName) {
         const editableExtensions = [
           ".properties",
+          ".txt",
+          ".log",
           ".json",
           ".yml",
           ".yaml",
-          ".txt",
-          ".log",
           ".cfg",
           ".conf",
-          ".config",
           ".ini",
           ".sh",
           ".bat",
           ".md",
         ];
-
-        const ext = filename.toLowerCase().substring(filename.lastIndexOf("."));
+        const extension = fileName
+          .toLowerCase()
+          .substring(fileName.lastIndexOf("."));
         return (
-          editableExtensions.includes(ext) ||
-          filename === "whitelist.json" ||
-          filename === "ops.json" ||
-          filename === "banned-players.json" ||
-          filename === "banned-ips.json"
+          editableExtensions.includes(extension) ||
+          fileName === "server.properties" ||
+          fileName === "ops.json" ||
+          fileName === "whitelist.json"
         );
       }
 
       // Open file in editor
       function openFileEditor(filePath) {
-        window.location.href = `file-editor.html?path=${encodeURIComponent(
-          filePath
-        )}`;
+        const serverName = getServerName();
+        window.open(
+          `editor.html?server=${serverName}&path=${encodeURIComponent(
+            filePath
+          )}`,
+          "_blank"
+        );
+      }
+
+      // Navigation functions
+      function backToDashboard() {
+        window.location.href = "index.html";
+      }
+
+      function backToServerManagement() {
+        const serverName = getServerName();
+        window.location.href = `test-websocket.html?server=${serverName}`;
       }
 
       // Initialize browser
       document.addEventListener("DOMContentLoaded", () => {
+        // Update header with server name
+        const serverInfo = document.getElementById("serverInfo");
+        if (serverInfo) {
+          serverInfo.textContent = `Browse files for server: ${serverName}`;
+        }
+
         loadFiles("/data"); // Start from Minecraft server directory
       });
     </script>

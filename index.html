@@ -1,0 +1,476 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>MinePanel - Server Dashboard</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        margin: 0;
+        padding: 20px;
+        background: #1e1e1e;
+        color: #fff;
+      }
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      .header {
+        text-align: center;
+        margin-bottom: 30px;
+        padding: 20px;
+        background: #2d2d2d;
+        border-radius: 8px;
+      }
+      .header h1 {
+        margin: 0;
+        color: #4caf50;
+      }
+      .actions {
+        margin-bottom: 30px;
+        text-align: center;
+      }
+      .btn {
+        background: #4caf50;
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        cursor: pointer;
+        border-radius: 6px;
+        font-size: 16px;
+        margin: 0 10px;
+        transition: background 0.3s;
+      }
+      .btn:hover {
+        background: #45a049;
+      }
+      .btn-secondary {
+        background: #2196f3;
+      }
+      .btn-secondary:hover {
+        background: #1976d2;
+      }
+      .btn-danger {
+        background: #f44336;
+      }
+      .btn-danger:hover {
+        background: #d32f2f;
+      }
+      .servers-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        gap: 20px;
+        margin-top: 20px;
+      }
+      .server-card {
+        background: #2d2d2d;
+        border-radius: 8px;
+        padding: 20px;
+        border: 1px solid #444;
+      }
+      .server-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 15px;
+      }
+      .server-name {
+        font-size: 18px;
+        font-weight: bold;
+        color: #4caf50;
+      }
+      .status {
+        padding: 4px 12px;
+        border-radius: 4px;
+        font-size: 12px;
+        font-weight: bold;
+        text-transform: uppercase;
+      }
+      .status.running {
+        background: #4caf50;
+        color: white;
+      }
+      .status.stopped {
+        background: #f44336;
+        color: white;
+      }
+      .status.creating {
+        background: #ff9800;
+        color: white;
+      }
+      .server-info {
+        margin-bottom: 15px;
+      }
+      .server-info div {
+        margin: 5px 0;
+        color: #ccc;
+      }
+      .server-actions {
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .btn-small {
+        padding: 6px 12px;
+        font-size: 14px;
+      }
+      .modal {
+        display: none;
+        position: fixed;
+        z-index: 1000;
+        left: 0;
+        top: 0;
+        width: 100%;
+        height: 100%;
+        background-color: rgba(0, 0, 0, 0.5);
+      }
+      .modal-content {
+        background-color: #2d2d2d;
+        margin: 15% auto;
+        padding: 20px;
+        border-radius: 8px;
+        width: 400px;
+        border: 1px solid #444;
+      }
+      .modal-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 20px;
+      }
+      .close {
+        color: #aaa;
+        font-size: 28px;
+        font-weight: bold;
+        cursor: pointer;
+      }
+      .close:hover {
+        color: #fff;
+      }
+      .form-group {
+        margin-bottom: 15px;
+      }
+      .form-group label {
+        display: block;
+        margin-bottom: 5px;
+        color: #ccc;
+      }
+      .form-group input,
+      .form-group select {
+        width: 100%;
+        padding: 8px;
+        border: 1px solid #555;
+        border-radius: 4px;
+        background: #1e1e1e;
+        color: #fff;
+        font-size: 14px;
+      }
+      .form-group input:focus,
+      .form-group select:focus {
+        outline: none;
+        border-color: #4caf50;
+      }
+      .loading {
+        text-align: center;
+        color: #ccc;
+        margin: 20px 0;
+      }
+      .error {
+        color: #f44336;
+        text-align: center;
+        margin: 10px 0;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="header">
+        <h1>🎮 MinePanel Server Dashboard</h1>
+        <p>Manage your Minecraft servers with ease</p>
+      </div>
+
+      <div class="actions">
+        <button class="btn" onclick="openCreateModal()">
+          ➕ Create New Server
+        </button>
+        <button class="btn btn-secondary" onclick="refreshServers()">
+          🔄 Refresh Servers
+        </button>
+      </div>
+
+      <div id="loading" class="loading" style="display: none">
+        Loading servers...
+      </div>
+
+      <div id="error" class="error" style="display: none"></div>
+
+      <div id="serversContainer">
+        <div class="servers-grid" id="serversGrid">
+          <!-- Servers will be loaded here -->
+        </div>
+      </div>
+
+      <!-- Create Server Modal -->
+      <div id="createModal" class="modal">
+        <div class="modal-content">
+          <div class="modal-header">
+            <h2>Create New Server</h2>
+            <span class="close" onclick="closeCreateModal()">&times;</span>
+          </div>
+          <form id="createForm">
+            <div class="form-group">
+              <label for="serverName">Server Name:</label>
+              <input
+                type="text"
+                id="serverName"
+                name="name"
+                required
+                placeholder="my-server"
+              />
+            </div>
+            <div class="form-group">
+              <label for="serverPort">Port:</label>
+              <input
+                type="number"
+                id="serverPort"
+                name="port"
+                required
+                min="1024"
+                max="65535"
+                value="25565"
+              />
+            </div>
+            <div class="form-group">
+              <label for="serverType">Server Type:</label>
+              <select id="serverType" name="type" required>
+                <option value="vanilla">Vanilla</option>
+                <option value="paper">Paper</option>
+                <option value="fabric">Fabric</option>
+                <option value="forge">Forge</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <button type="submit" class="btn">Create Server</button>
+            </div>
+          </form>
+          <div id="createError" class="error" style="display: none"></div>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      let servers = [];
+
+      // Load servers on page load
+      document.addEventListener("DOMContentLoaded", () => {
+        loadServers();
+      });
+
+      // Load servers from API
+      async function loadServers() {
+        const loading = document.getElementById("loading");
+        const error = document.getElementById("error");
+        const grid = document.getElementById("serversGrid");
+
+        loading.style.display = "block";
+        error.style.display = "none";
+
+        try {
+          const response = await fetch(
+            "http://localhost:8080/api/v1/minecraft/servers"
+          );
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || "Failed to load servers");
+          }
+
+          servers = data.servers || [];
+          renderServers();
+        } catch (err) {
+          console.error("Error loading servers:", err);
+          error.textContent = "Error loading servers: " + err.message;
+          error.style.display = "block";
+        } finally {
+          loading.style.display = "none";
+        }
+      }
+
+      // Render servers in the grid
+      function renderServers() {
+        const grid = document.getElementById("serversGrid");
+
+        if (servers.length === 0) {
+          grid.innerHTML =
+            '<div style="grid-column: 1/-1; text-align: center; color: #ccc; padding: 40px;">No servers found. Create your first server!</div>';
+          return;
+        }
+
+        grid.innerHTML = servers
+          .map(
+            (server) => `
+          <div class="server-card">
+            <div class="server-header">
+              <div class="server-name">${server.name}</div>
+              <div class="status ${server.status.toLowerCase()}">${
+              server.status
+            }</div>
+            </div>
+            <div class="server-info">
+              <div><strong>Port:</strong> ${server.port || "N/A"}</div>
+              <div><strong>Type:</strong> ${server.type || "Unknown"}</div>
+              <div><strong>ID:</strong> ${server.id}</div>
+            </div>
+            <div class="server-actions">
+              <button class="btn btn-small btn-secondary" onclick="openServer('${
+                server.id
+              }')">🎮 Manage</button>
+              <button class="btn btn-small btn-secondary" onclick="openFiles('${
+                server.id
+              }')">📁 Files</button>
+              ${
+                server.type === "paper"
+                  ? `<button class="btn btn-small btn-secondary" onclick="openPlugins('${server.id}')">🔌 Plugins</button>`
+                  : ""
+              }
+              ${
+                server.status === "running"
+                  ? `<button class="btn btn-small btn-danger" onclick="stopServer('${server.id}')">⏹️ Stop</button>`
+                  : `<button class="btn btn-small" onclick="startServer('${server.id}')">▶️ Start</button>`
+              }
+            </div>
+          </div>
+        `
+          )
+          .join("");
+      }
+
+      // Open server management page
+      function openServer(serverId) {
+        window.open(`test-websocket.html?server=${serverId}`, "_blank");
+      }
+
+      // Open file browser
+      function openFiles(serverId) {
+        window.open(`file-browser.html?server=${serverId}`, "_blank");
+      }
+
+      // Open plugin manager (Paper servers only)
+      function openPlugins(serverId) {
+        window.open(`plugins.html?server=${serverId}`, "_blank");
+      }
+
+      // Start server
+      async function startServer(serverId) {
+        try {
+          const response = await fetch(
+            `http://localhost:8080/api/v1/minecraft/${serverId}/start`,
+            {
+              method: "POST",
+            }
+          );
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || "Failed to start server");
+          }
+
+          // Refresh servers after a short delay
+          setTimeout(loadServers, 1000);
+        } catch (err) {
+          alert("Error starting server: " + err.message);
+        }
+      }
+
+      // Stop server
+      async function stopServer(serverId) {
+        if (!confirm("Are you sure you want to stop this server?")) {
+          return;
+        }
+
+        try {
+          const response = await fetch(
+            `http://localhost:8080/api/v1/minecraft/${serverId}/stop`,
+            {
+              method: "POST",
+            }
+          );
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || "Failed to stop server");
+          }
+
+          // Refresh servers after a short delay
+          setTimeout(loadServers, 1000);
+        } catch (err) {
+          alert("Error stopping server: " + err.message);
+        }
+      }
+
+      // Refresh servers
+      function refreshServers() {
+        loadServers();
+      }
+
+      // Modal functions
+      function openCreateModal() {
+        document.getElementById("createModal").style.display = "block";
+      }
+
+      function closeCreateModal() {
+        document.getElementById("createModal").style.display = "none";
+        document.getElementById("createForm").reset();
+        document.getElementById("createError").style.display = "none";
+      }
+
+      // Handle create form submission
+      document
+        .getElementById("createForm")
+        .addEventListener("submit", async (e) => {
+          e.preventDefault();
+
+          const formData = new FormData(e.target);
+          const createError = document.getElementById("createError");
+
+          try {
+            const response = await fetch(
+              "http://localhost:8080/api/v1/minecraft/create",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                },
+                body: JSON.stringify({
+                  name: formData.get("name"),
+                  port: formData.get("port"),
+                  type: formData.get("type"),
+                }),
+              }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+              throw new Error(data.error || "Failed to create server");
+            }
+
+            closeCreateModal();
+            loadServers(); // Refresh the server list
+          } catch (err) {
+            createError.textContent = "Error creating server: " + err.message;
+            createError.style.display = "block";
+          }
+        });
+
+      // Close modal when clicking outside
+      window.onclick = function (event) {
+        const modal = document.getElementById("createModal");
+        if (event.target === modal) {
+          closeCreateModal();
+        }
+      };
+    </script>
+  </body>
+</html>

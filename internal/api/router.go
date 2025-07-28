@@ -27,6 +27,7 @@ func NewRouter(dockerClient *docker.Client) *gin.Engine {
 
 	// Initialize handlers
 	minecraftHandler := handlers.NewMinecraftHandler(dockerClient)
+	pluginHandler := handlers.NewPluginHandler(dockerClient)
 
 	// API routes
 	v1 := router.Group("/api/v1")
@@ -38,10 +39,19 @@ func NewRouter(dockerClient *docker.Client) *gin.Engine {
 			minecraft.POST("/:id/stop", minecraftHandler.StopServer)
 			minecraft.GET("/:id/status", minecraftHandler.GetServerStatus)
 			minecraft.GET("/servers", minecraftHandler.ListServers)
+			minecraft.GET("/:id/logs/recent", minecraftHandler.GetRecentLogs)         // Get recent logs (REST)
 			minecraft.GET("/:id/logs", minecraftHandler.StreamServerLogs)             // WebSocket endpoint
 			minecraft.GET("/:id/files", minecraftHandler.ListServerFiles)             // File browser endpoint
 			minecraft.GET("/:id/files/download", minecraftHandler.DownloadServerFile) // File download endpoint
 			minecraft.PUT("/:id/files/save", minecraftHandler.SaveServerFile)         // File save endpoint
+		}
+
+		plugins := v1.Group("/plugins")
+		{
+			plugins.GET("/", pluginHandler.ListPlugins)                               // List available plugins
+			plugins.GET("/search", pluginHandler.SearchPlugins)                       // Search plugins
+			plugins.GET("/:id/versions", pluginHandler.GetPluginVersions)             // Get plugin versions
+			plugins.POST("/install/:serverID/:pluginID", pluginHandler.InstallPlugin) // Install plugin to server
 		}
 	}
 
